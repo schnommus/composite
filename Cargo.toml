@@ -6,3 +6,4 @@ authors = ["Sebastian Holzapfel <seb.holzapfel@data61.csiro.au>"]
 [dependencies]
 futures = "*"
 byteorder = "*"
+sdl2 = "*"
