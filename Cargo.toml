@@ -7,3 +7,5 @@ authors = ["Sebastian Holzapfel <seb.holzapfel@data61.csiro.au>"]
 futures = "*"
 byteorder = "*"
 sdl2 = "*"
+flame = "0.2.2"
+flamer = "^0.2.3"

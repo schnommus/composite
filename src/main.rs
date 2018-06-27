@@ -1,3 +1,9 @@
+// PROFILING INSTRUMENTATION
+#![feature(plugin, custom_attribute)]
+#![plugin(flamer)]
+extern crate flame;
+// END PROFILING INSTRUMENTATION
+//
 extern crate byteorder;
 extern crate sdl2;
 
@@ -171,6 +177,7 @@ impl CompositeDecode {
 
     }
 
+    #[flame]
     fn draw_scanline(&mut self) {
         if self.last_field == Field::Unknown ||
            self.last_sync == SyncPulse::Unknown {
@@ -189,8 +196,12 @@ impl CompositeDecode {
         if self.last_sync == SyncPulse::Horizontal &&
            self.cur_scanline_index >= 0 &&
            self.cur_scanline_index < (SCREEN_HEIGHT as i32) {
-                let luma = filter(&self.cur_scanline, &self.fir_luma);
+                flame::start("filter luma");
+                let mut luma = [0.0; SCANLINE_SAMPLES];
+                filter(&self.cur_scanline, &self.fir_luma, &mut luma);
+                flame::end("filter luma");
 
+                flame::start("create cos/sin waves");
                 let cos_wave: Vec<f32> =
                                (0..SCANLINE_SAMPLES)
                                .map(|v| v as f32 * 1.0 / SAMPLE_RATE)
@@ -202,7 +213,9 @@ impl CompositeDecode {
                                .map(|v| v as f32 * 1.0 / SAMPLE_RATE)
                                .map(|t| f32::sin(2.0*PI*F_BURST*t))
                                .collect();
+                flame::end("create cos/sin waves");
 
+                flame::start("i/q demodulation");
                 let i_raw: Vec<f32> =
                                cos_wave.iter()
                                        .zip(self.cur_scanline.iter())
@@ -214,25 +227,33 @@ impl CompositeDecode {
                                        .zip(self.cur_scanline.iter())
                                        .map(|(a, b)| a * b)
                                        .collect();
+                flame::end("i/q demodulation");
 
-                let i_raw = filter(&i_raw, &self.fir_luma);
-                let q_raw = filter(&q_raw, &self.fir_luma);
+                flame::start("i/q LPF");
+                let mut i_filtered = [0.0; SCANLINE_SAMPLES];
+                let mut q_filtered = [0.0; SCANLINE_SAMPLES];
+                filter(&i_raw, &self.fir_luma, &mut i_filtered);
+                filter(&q_raw, &self.fir_luma, &mut q_filtered);
+                flame::end("i/q LPF");
 
-                let (i_burst, q_burst) = (i_raw[SCANLINE_BURST_N],
-                                          q_raw[SCANLINE_BURST_N]);
+                flame::start("i/q correction");
+                let (i_burst, q_burst) = (i_filtered[SCANLINE_BURST_N],
+                                          q_filtered[SCANLINE_BURST_N]);
 
                 let i_real: Vec<f32> =
-                               i_raw.iter()
-                                    .zip(q_raw.iter())
+                               i_filtered.iter()
+                                    .zip(q_filtered.iter())
                                     .map(|(i, q)| i_burst * i + q_burst * q)
                                     .collect();
 
                 let q_real: Vec<f32> =
-                               i_raw.iter()
-                                    .zip(q_raw.iter())
+                               i_filtered.iter()
+                                    .zip(q_filtered.iter())
                                     .map(|(i, q)| i_burst * q - q_burst * i)
                                     .collect();
+                flame::end("i/q correction");
 
+                flame::start("convert & draw scanline");
                 for x in 0..(SCREEN_WIDTH-1) {
                     let x_csl = SCANLINE_VID_START_N +
                                     ((x * SCANLINE_VID_SAMPLES as u32)
@@ -252,6 +273,7 @@ impl CompositeDecode {
                             255));
                     self.canvas.draw_point((x as i32, self.cur_scanline_index));
                 }
+                flame::end("convert & draw scanline");
             self.canvas.present();
         }
 
@@ -261,6 +283,7 @@ impl CompositeDecode {
 
     }
 
+    #[flame]
     fn process(&mut self) {
 
         let buf = self.input_buffer;
@@ -301,9 +324,11 @@ impl CompositeDecode {
 
                     self.draw_scanline();
 
+                    /*
                     print!("sync: {:.2} usec [{} samples] \t",
                            len_sec * 1e6,
                            self.since_edge);
+                           */
 
                     let broad_sync_len = V_SYNC_SECTION_SEC - V_BROAD_SYNC_PULSE_SEC;
                     if (len_sec - H_SYNC_PULSE_SEC).abs() < SYNC_LEN_DELTA {
@@ -325,7 +350,9 @@ impl CompositeDecode {
                         // Do nothing with unknown sync pulse for now
                     }
 
+                    /*
                     println!("{:?} \t {:?}", self.last_sync, self.last_field);
+                    */
 
                 }
 
@@ -383,6 +410,8 @@ fn main() {
             break;
         }
     }
+
+    flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
 
     let mut events = context.event_pump().unwrap();
     'main: loop {

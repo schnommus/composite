@@ -69,44 +69,12 @@ pub fn fir_design(filter_type: FilterType, window_type: WindowType, filter_len: 
            .collect()
 }
 
-/// Simple, O(n^2), real -> abs mag dft
-pub fn dft(x: &[f32], n_samples: usize) -> Vec<f32> {
-
-    let mut y_re = vec![0.0; n_samples];
-    let mut y_im = vec![0.0; n_samples];
-
-    let m = x.len();
-
-    for k in 0..n_samples {
-        for n in 0..(m-1) {
-            y_re[k] += x[n] * f32::cos(2.0 * PI * k as f32 * n as f32 / n_samples as f32);
-            y_im[k] -= x[n] * f32::sin(2.0 * PI * k as f32 * n as f32 / n_samples as f32);
+/// Dumb O(n*m) filter
+pub fn filter(signal: &[f32], kernel: &[f32], result: &mut [f32]) {
+    assert!(result.len() == signal.len());
+    for n in kernel.len()..signal.len() {
+        for k in 0..kernel.len() {
+            result[n] += signal[n-k] * kernel[k];
         }
     }
-
-    y_re.iter()
-        .zip(y_im)
-        .map(|(a, b)| f32::sqrt(a*a + b*b))
-        .collect()
-}
-
-/// Simple O(n*m) convolution
-pub fn convolve(signal: &[f32], kernel: &[f32]) -> Vec<f32> {
-    let result_len = signal.len() + kernel.len() - 1;
-    let mut y = vec![0.0; result_len];
-    for n in 0..result_len {
-        let kmin = if n >= kernel.len() - 1 {n - (kernel.len() - 1)} else {0};
-        let kmax = if n < signal.len() - 1 {n} else {signal.len() - 1};
-        for k in kmin..kmax {
-            y[n] += signal[k] * kernel[n - k];
-        }
-    }
-    y
-}
-
-/// Applies convolution, but corrects for time delay and culls to signal length
-pub fn filter(signal: &[f32], kernel: &[f32]) -> Vec<f32> {
-    let mut ret = convolve(signal, kernel).split_off(kernel.len()/2);
-    ret.resize(signal.len(), 0.0);
-    ret
 }
